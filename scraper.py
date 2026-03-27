@@ -37,23 +37,23 @@ def run_scraper():
             page.wait_for_load_state("networkidle", timeout=30000)
             save_debug_screenshot(page, "01_pagina_inicial")
 
-            # Esperar que el dropdown de Secretaria sea visible
+            # Esperar que los dropdowns sean visibles
             page.wait_for_selector(".ui-selectonemenu", timeout=15000)
-            print("Página cargada. Seleccionando Secretaría = Antioquia...")
+            print("Página cargada. Seleccionando Departamento/Municipio = ANTIOQUIA...")
 
-            # Hacer clic en el primer dropdown (Secretaria)
-            page.locator(".ui-selectonemenu").first.click()
+            # El segundo dropdown es "Departamento/Municipio" (índice 1)
+            page.locator(".ui-selectonemenu").nth(1).click()
             time.sleep(1.5)
             save_debug_screenshot(page, "02_dropdown_abierto")
 
-            # Seleccionar "Antioquia"
+            # Seleccionar "ANTIOQUIA" — texto exacto del dropdown Departamento/Municipio
             try:
-                page.locator("tr.ui-selectonemenu-item, li.ui-selectonemenu-item").filter(has_text="Antioquia").first.click(timeout=8000)
+                page.locator("tr.ui-selectonemenu-item, li.ui-selectonemenu-item").filter(has_text="ANTIOQUIA").first.click(timeout=8000)
             except PlaywrightTimeoutError:
-                # Fallback: buscar por texto exacto en cualquier elemento de lista
+                # Fallback: texto insensible a mayúsculas
                 page.locator("[class*='selectonemenu-item']").filter(has_text="Antioquia").first.click(timeout=5000)
 
-            print("Opción Antioquia seleccionada. Esperando recarga AJAX...")
+            print("ANTIOQUIA seleccionado en Departamento/Municipio. Esperando recarga AJAX...")
 
             # Esperar a que la red quede idle (AJAX completado)
             page.wait_for_load_state("networkidle", timeout=30000)
