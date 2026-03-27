@@ -106,51 +106,28 @@ def run_scraper():
                     print(f"  Sin vacantes en página {current_page}. Fin.")
                     break
 
-                # Extraer datos básicos visibles en todas las tarjetas (sin expandir)
-                basic_cards = get_visible_card_data(page)
-                print(f"  → {len(basic_cards)} vacantes en página {current_page}")
-
-                # Expandir cada tarjeta para obtener Establecimiento/Sede
-                for i, card_data in enumerate(basic_cards):
+                # Expandir todas las tarjetas de la página
+                ver_btns = page.locator("a, button").filter(has_text="Ver detalle")
+                count = ver_btns.count()
+                
+                for _ in range(count):
                     try:
-                        # Tomar el botón "Ver detalle" correspondiente a la iteración actua
-                        ver_btns = page.locator("a, button").filter(has_text="Ver detalle")
-                        
-                        # Precaución: si por alguna razón no hay suficientes botones, salir
-                        if ver_btns.count() <= i:
-                            print(f"    Advertencia: No se encontró botón 'Ver detalle' para tarjeta {i}")
-                            plazas.append(card_data)
-                            continue
-                            
-                        ver_btn = ver_btns.nth(i)
-                        ver_btn.scroll_into_view_if_needed()
-                        ver_btn.click()
-
-                        # Esperar que aparezca "Ocultar detalle"
-                        try:
-                            page.wait_for_selector("a:has-text('Ocultar'), button:has-text('Ocultar')", timeout=5000)
-                            time.sleep(0.5)
-                        except PlaywrightTimeoutError:
-                            pass
-
-                        # Extraer datos del detalle expandido
-                        extra = get_expanded_card_details(page)
-                        if extra:
-                            card_data.update(extra)
-
-                        print(f"    + {card_data.get('Cargo','?')} | {card_data.get('Municipio','?')} | {card_data.get('Establecimiento','?')}")
-                        plazas.append(card_data)
-
-                        # Contraer asegurándonos de hacer clic en el botón Ocultar correcto
-                        ocultar = page.locator("a, button").filter(has_text="Ocultar").first
-                        if ocultar.is_visible():
-                            ocultar.click()
-                            time.sleep(0.5)
-
+                        # Siempre le damos al primer "Ver detalle" porque al expandirse cambia a "Ocultar"
+                        btn = page.locator("a, button").filter(has_text="Ver detalle").first
+                        if btn.is_visible():
+                            btn.scroll_into_view_if_needed()
+                            btn.click()
+                            time.sleep(0.3)
                     except Exception as err:
-                        print(f"    Error tarjeta {i}: {err}")
-                        plazas.append(card_data)  # Guardar al menos los básicos
-                        continue
+                        print(f"    Advertencia expandiendo tarjeta: {err}")
+                        
+                # Extraer todos los datos de golpe de las tarjetas expandidas
+                cards_data = get_fully_expanded_cards_data(page)
+                print(f"  → {len(cards_data)} vacantes extraídas en página {current_page}")
+                
+                for cd in cards_data:
+                    print(f"    + {cd.get('Cargo','?')} | {cd.get('Municipio','?')} | {cd.get('Establecimiento','?')}")
+                    plazas.append(cd)
 
                 save_debug_screenshot(page, f"pag_{current_page}_extraida")
 
@@ -180,13 +157,12 @@ def run_scraper():
     return plazas
 
 
-def get_visible_card_data(page):
-    """Extrae datos básicos visibles de todas las tarjetas sin expandir."""
-    # Nota: usamos un string JS sin comillas simples con \n para evitar SyntaxError
+def get_fully_expanded_cards_data(page):
+    """Extrae TODOS los datos requeridos asumiendo que las tarjetas ya fueron expandidas."""
     JS = """
     (function() {
-        var detailBtns = Array.from(document.querySelectorAll('a, button')).filter(function(el) {
-            return el.innerText && el.innerText.trim() === 'Ver detalle';
+        var ocultarBtns = Array.from(document.querySelectorAll('a, button')).filter(function(el) {
+            return el.innerText && el.innerText.trim().toLowerCase().indexOf('ocultar') >= 0;
         });
 
         function extractFromCard(btn) {
@@ -212,6 +188,7 @@ def get_visible_card_data(page):
                 }
                 return 'N/A';
             }
+
             return {
                 Cargo: lines.length > 0 ? lines[0] : after('Cargo'),
                 'Tipo Priorización': after('tipo priorizaci') !== 'N/A' ? after('tipo priorizaci') : 'N/A',
@@ -221,64 +198,21 @@ def get_visible_card_data(page):
                 Postulados: after('postulados'),
                 Zona: after('zona'),
                 Departamento: after('departamento'),
-                Secretaria: after('secretar')
+                Secretaria: after('secretar'),
+                Establecimiento: after('establecimiento educativo') !== 'N/A' ? after('establecimiento educativo') : after('establecimiento'),
+                Sede: after('sede'),
+                'Zona Detalle': after('zona'),
+                Barrio: after('barrio'),
+                Direccion: after('direcci') !== 'N/A' ? after('direcci') : 'N/A',
+                'Calendario Educativo': after('calendario educativo')
             };
         }
 
-        return detailBtns.map(function(btn) { return extractFromCard(btn); });
+        return ocultarBtns.map(function(btn) { return extractFromCard(btn); });
     })()
     """
     try:
         return page.evaluate(JS) or []
     except Exception as e:
-        print(f"  Error get_visible_card_data: {e}")
+        print(f"  Error get_fully_expanded_cards_data: {e}")
         return []
-
-
-def get_expanded_card_details(page):
-    """Extrae datos del detalle expandido (Establecimiento, Sede, Dirección)."""
-    JS = """
-    (function() {
-        var ocultarBtns = Array.from(document.querySelectorAll('a, button')).filter(function(el) {
-            return el.innerText && el.innerText.trim().toLowerCase().indexOf('ocultar') >= 0;
-        });
-        if (ocultarBtns.length === 0) return null;
-
-        var btn = ocultarBtns[0];
-        var card = btn;
-        for (var j = 0; j < 12; j++) {
-            if (!card.parentElement) break;
-            card = card.parentElement;
-            if (card.querySelectorAll('a, button').length >= 2) break;
-        }
-
-        var lines = (card.innerText || '').split(/\\r?\\n/).map(function(l) { return l.trim(); }).filter(Boolean);
-
-        function after(label) {
-            var lLabel = label.toLowerCase();
-            for (var i = 0; i < lines.length; i++) {
-                var lLine = lines[i].toLowerCase();
-                if (lLine.indexOf(lLabel) === 0) {
-                    var inline = lines[i].substring(label.length).replace(/^\\s*:\\s*/, '').trim();
-                    if (inline) return inline;
-                    if (i + 1 < lines.length) return lines[i + 1];
-                }
-            }
-            return 'N/A';
-        }
-
-        return {
-            Establecimiento: after('establecimiento educativo') !== 'N/A' ? after('establecimiento educativo') : after('establecimiento'),
-            Sede: after('sede'),
-            'Zona Detalle': after('zona'),
-            Barrio: after('barrio'),
-            Direccion: after('direcci') !== 'N/A' ? after('direcci') : 'N/A',
-            'Calendario Educativo': after('calendario educativo')
-        };
-    })()
-    """
-    try:
-        return page.evaluate(JS)
-    except Exception as e:
-        print(f"  Error get_expanded_card_details: {e}")
-        return None
