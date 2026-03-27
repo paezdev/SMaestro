@@ -46,11 +46,11 @@ def run_scraper():
             time.sleep(1.5)
             save_debug_screenshot(page, "02_dropdown_abierto")
 
-            # Seleccionar "ANTIOQUIA" — texto exacto del dropdown Departamento/Municipio
+            # Seleccionar "Antioquia" del dropdown Departamento/Municipio
             try:
-                page.locator("tr.ui-selectonemenu-item, li.ui-selectonemenu-item").filter(has_text="ANTIOQUIA").first.click(timeout=8000)
+                page.locator("tr.ui-selectonemenu-item, li.ui-selectonemenu-item").filter(has_text="Antioquia").first.click(timeout=8000)
             except PlaywrightTimeoutError:
-                # Fallback: texto insensible a mayúsculas
+                # Fallback: cualquier elemento que contenga el texto
                 page.locator("[class*='selectonemenu-item']").filter(has_text="Antioquia").first.click(timeout=5000)
 
             print("ANTIOQUIA seleccionado en Departamento/Municipio. Esperando recarga AJAX...")
