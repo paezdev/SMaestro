@@ -23,7 +23,7 @@ def run_scraper():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"]  # necesario en Linux/CI
+            args=["--no-sandbox", "--disable-dev-shm-usage"]
         )
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -39,9 +39,9 @@ def run_scraper():
 
             # Esperar que los dropdowns sean visibles
             page.wait_for_selector(".ui-selectonemenu", timeout=15000)
-            print("Página cargada. Seleccionando Departamento/Municipio = ANTIOQUIA...")
+            print("Página cargada. Seleccionando Departamento/Municipio = Antioquia...")
 
-            # 1) Clic en el trigger (flecha) del segundo dropdown: Departamento/Municipio
+            # 1) Clic en el trigger (flecha) del segundo dropdown: Departamento/Municipio (índice 1)
             page.locator(".ui-selectonemenu").nth(1).locator(".ui-selectonemenu-trigger").click()
 
             # 2) Esperar que el panel flotante sea visible
@@ -49,35 +49,48 @@ def run_scraper():
             time.sleep(0.5)
             save_debug_screenshot(page, "02_dropdown_abierto")
 
-            # 3) El panel tiene un input de búsqueda: escribir "Antioquia" para filtrar la lista
+            # 3) Escribir "Antioquia" en el input de búsqueda del panel para filtrar opciones
             filter_input = page.locator("#form-busqueda\\:idInputDepartamento_filter")
             filter_input.fill("Antioquia")
-            time.sleep(1)  # esperar que PrimeFaces filtre los resultados
+            time.sleep(1.5)  # esperar que PrimeFaces filtre los resultados
             save_debug_screenshot(page, "03_antioquia_filtrado")
 
-            # 4) Clic en la fila que diga exactamente "Antioquia" (sin barra, es solo el departamento)
-            page.locator(".ui-selectonemenu-panel:visible").locator("tr, li").filter(has_text="Antioquia").first.click(timeout=8000)
+            # 4) Clic en la fila EXACTAMENTE "Antioquia" usando JavaScript para evitar
+            #    seleccionar "Antioquia/Abejorral" u otras opciones que también la contienen.
+            clicked = page.evaluate("""
+                () => {
+                    const panel = document.querySelector('.ui-selectonemenu-panel');
+                    if (!panel) return 'panel_not_found';
+                    const rows = panel.querySelectorAll('tr, li');
+                    for (const row of rows) {
+                        const txt = row.innerText ? row.innerText.trim() : '';
+                        if (txt === 'Antioquia') {
+                            row.click();
+                            return 'clicked:' + txt;
+                        }
+                    }
+                    // Si no hay exacta, mostrar las opciones disponibles para diagnóstico
+                    const available = Array.from(rows).map(r => r.innerText ? r.innerText.trim() : '').filter(Boolean).join(', ');
+                    return 'not_found. Available: ' + available.substring(0, 300);
+                }
+            """)
+            print(f"  Selección dropdown resultado: {clicked}")
 
-
-            print("ANTIOQUIA seleccionado en Departamento/Municipio. Esperando recarga AJAX...")
-
-            # Esperar a que la red quede idle (AJAX completado)
+            print("Esperando recarga AJAX tras seleccionar Antioquia...")
             page.wait_for_load_state("networkidle", timeout=30000)
             time.sleep(2)
-            save_debug_screenshot(page, "03_antioquia_seleccionada")
+            save_debug_screenshot(page, "04_antioquia_seleccionada")
 
-            # Verificar que existan resultados usando múltiples selectores posibles
-            ver_detalle_selector = "a:text('Ver detalle'), button:text('Ver detalle'), a:text-is('Ver detalle'), [id*='verDetalle'], [id*='ver-detalle']"
+            # Verificar que existan resultados
             try:
-                page.wait_for_selector(ver_detalle_selector, timeout=15000)
-                print("Resultados de Antioquia cargados.")
-            except PlaywrightTimeoutError:
-                save_debug_screenshot(page, "04_error_sin_resultados")
-                print("ADVERTENCIA: No se encontraron botones 'Ver detalle'. Revisar screenshot 04.")
-                # Intentar igualmente continuar
+                page.wait_for_selector("a, button", timeout=5000)
+                # verificar si hay "Ver detalle"
+                count_vd = page.locator("a, button").filter(has_text="Ver detalle").count()
+                print(f"Resultados cargados. Botones 'Ver detalle' visibles: {count_vd}")
+            except Exception:
                 pass
 
-            save_debug_screenshot(page, "04_resultados_listados")
+            save_debug_screenshot(page, "05_resultados_listados")
 
             # --- Loop de paginación ---
             current_page = 1
@@ -86,52 +99,25 @@ def run_scraper():
             while True:
                 print(f"Extrayendo datos de la página {current_page}...")
 
-                # Contar cuántos links de "Ver detalle" existen con selector más amplio
-                detail_links = page.locator("a, button").filter(has_text="Ver detalle")
-                count = detail_links.count()
-
-                if count == 0:
-                    # Intentar con texto parcial o insensible a mayúsculas
-                    detail_links = page.locator("a, button").filter(has_text="detalle")
-                    count = detail_links.count()
-
-                if count == 0:
-                    print(f"  No se encontraron vacantes en la página {current_page}. Fin.")
+                # Esperar que aparezcan los botones de detalle
+                try:
+                    page.wait_for_selector("a:has-text('Ver detalle'), button:has-text('Ver detalle')", timeout=10000)
+                except PlaywrightTimeoutError:
+                    print(f"  No se encontraron botones 'Ver detalle' en página {current_page}. Fin.")
                     save_debug_screenshot(page, f"pag_{current_page}_sin_vacantes")
                     break
 
-                print(f"  → {count} vacantes detectadas en página {current_page}")
+                # Extraer todas las tarjetas de la página actual de una sola vez usando JS
+                cards_data = extract_all_cards_js(page)
+                print(f"  → {len(cards_data)} vacantes extraídas en página {current_page}")
+                for plaza in cards_data:
+                    if plaza:
+                        print(f"    + {plaza.get('Cargo','?')} | {plaza.get('Municipio','?')} | {plaza.get('Area','?')}")
+                        plazas.append(plaza)
 
-                for i in range(count):
-                    try:
-                        # Re-localizar para evitar referencias DOM obsoletas
-                        current_links = page.locator("a, button").filter(has_text="Ver detalle")
-                        if current_links.count() <= i:
-                            break
-                        btn = current_links.nth(i)
-                        btn.scroll_into_view_if_needed()
-                        btn.click()
-                        page.wait_for_load_state("networkidle", timeout=10000)
-                        time.sleep(1)
-
-                        # Extraer datos con JavaScript
-                        plaza = extract_card_data(page)
-                        if plaza:
-                            print(f"    Extraída: {plaza.get('Cargo','?')} | {plaza.get('Municipio','?')} | {plaza.get('Area','?')}")
-                            plazas.append(plaza)
-                        else:
-                            print(f"    Tarjeta {i}: no se pudo extraer datos.")
-
-                        # Contraer expansión
-                        ocultar_links = page.locator("a, button").filter(has_text="Ocultar")
-                        if ocultar_links.count() > 0:
-                            ocultar_links.first.click()
-                            page.wait_for_load_state("networkidle", timeout=8000)
-                            time.sleep(0.5)
-
-                    except Exception as err:
-                        print(f"  Error procesando vacante {i}: {err}")
-                        continue
+                # Si hay 0 tarjetas, diagnóstico
+                if len(cards_data) == 0:
+                    save_debug_screenshot(page, f"pag_{current_page}_extraccion_fallida")
 
                 save_debug_screenshot(page, f"pag_{current_page}_extraida")
 
@@ -163,56 +149,143 @@ def run_scraper():
     return plazas
 
 
-def extract_card_data(page):
-    """Extrae datos de la tarjeta actualmente expandida (con 'Ocultar detalle' visible)."""
+def extract_all_cards_js(page):
+    """
+    Extrae todos los datos visibles de las tarjetas de la página actual
+    directamente with JavaScript, sin necesitar expandir cada una.
+    Los datos de Cargo, Área, Municipio, Cierre, Postulados son visibles sin expandir.
+    Para Establecimiento y Sede, expande cada tarjeta y cierra.
+    """
     try:
-        plaza = page.evaluate("""
+        # Primero: extraer los datos básicos visibles de cada tarjeta
+        basic_data = page.evaluate("""
             () => {
-                // Encontrar tarjeta expandida buscando el "Ocultar detalle"
-                const allEls = Array.from(document.querySelectorAll('a, button'));
-                const ocultar = allEls.find(el => el.innerText && el.innerText.trim().toLowerCase().includes('ocultar'));
-                if (!ocultar) return null;
+                // Los botones "Ver detalle" son la referencia para encontrar cada tarjeta
+                const detalleBtns = Array.from(document.querySelectorAll('a, button'))
+                    .filter(el => el.innerText && el.innerText.trim() === 'Ver detalle');
 
-                // Subir varios niveles hasta el contenedor de la tarjeta
-                let card = ocultar.parentElement;
-                for (let i = 0; i < 8; i++) {
-                    if (!card) break;
-                    const cls = card.className || '';
-                    if (cls.includes('p-grid') || cls.includes('ui-g') || cls.includes('vacante') || card.id.includes('tabla-vacantes')) break;
-                    card = card.parentElement;
-                }
-                if (!card) return null;
-
-                const text = card.innerText || '';
-                const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
-
-                function after(label) {
-                    for (let i = 0; i < lines.length; i++) {
-                        const l = lines[i].toLowerCase();
-                        if (l.startsWith(label.toLowerCase())) {
-                            const inline = lines[i].substring(label.length).replace(':', '').trim();
-                            if (inline) return inline;
-                            if (i + 1 < lines.length) return lines[i + 1];
-                        }
+                function getCardText(btn) {
+                    // Subir hasta el contenedor de la tarjeta
+                    let card = btn;
+                    for (let i = 0; i < 12; i++) {
+                        if (!card.parentElement) break;
+                        card = card.parentElement;
+                        const cls = card.className || '';
+                        // Buscar un contenedor que tenga múltiples campos (tarjeta completa)
+                        if (card.querySelectorAll('a, button').length >= 2) break;
                     }
-                    return 'N/A';
+
+                    const lines = (card.innerText || '').split('\n')
+                        .map(l => l.trim()).filter(Boolean);
+
+                    function after(label) {
+                        for (let i = 0; i < lines.length; i++) {
+                            if (lines[i].toLowerCase().startsWith(label.toLowerCase())) {
+                                const inline = lines[i].substring(label.length).replace(/^\\s*:\\s*/, '').trim();
+                                if (inline) return inline;
+                                if (i + 1 < lines.length) return lines[i + 1];
+                            }
+                        }
+                        return 'N/A';
+                    }
+
+                    return {
+                        Cargo: after('Cargo'),
+                        Area: after('Área') !== 'N/A' ? after('Área') : after('Area'),
+                        Municipio: after('Municipio'),
+                        'Cierre Vacante': after('Cierre vacante') !== 'N/A' ? after('Cierre vacante') : after('Cierre'),
+                        Postulados: after('Postulados'),
+                        Zona: after('Zona'),
+                        Secretaria: after('Secretaría de Educación') !== 'N/A' ? after('Secretaría de Educación') : after('Secretaria'),
+                        Departamento: after('Departamento'),
+                        raw_lines: lines.slice(0, 20).join(' | ')
+                    };
                 }
 
-                return {
-                    Cargo: after('Cargo'),
-                    Area: after('Área') !== 'N/A' ? after('Área') : after('Area'),
-                    Municipio: after('Municipio'),
-                    Establecimiento: after('Establecimiento educativo') !== 'N/A' ? after('Establecimiento educativo') : after('Establecimiento'),
-                    Sede: after('Sede'),
-                    'Cierre Vacante': after('Cierre vacante') !== 'N/A' ? after('Cierre vacante') : after('Cierre'),
-                    Postulados: after('Postulados'),
-                    Zona: after('Zona'),
-                    Direccion: after('Dirección') !== 'N/A' ? after('Dirección') : after('Direccion'),
-                    Secretaria: after('Secretaría de Educación') !== 'N/A' ? after('Secretaría de Educación') : after('Secretaria'),
-                };
+                return detalleBtns.map(btn => getCardText(btn));
             }
         """)
-        return plaza
+
+        if not basic_data:
+            return []
+
+        # Segundo: expandir cada tarjeta para obtener Establecimiento y Sede
+        detail_btns = page.locator("a, button").filter(has_text="Ver detalle")
+        count = detail_btns.count()
+
+        for i in range(min(count, len(basic_data))):
+            try:
+                # Re-localizar (el DOM cambia al expandir/colapsar)
+                btns = page.locator("a, button").filter(has_text="Ver detalle")
+                if btns.count() == 0:
+                    break
+                btn = btns.first  # siempre tomamos el primero disponible
+                btn.scroll_into_view_if_needed()
+                btn.click()
+
+                # Esperar que aparezca "Ocultar detalle" (señal de que se expandió)
+                try:
+                    page.wait_for_selector("a:has-text('Ocultar'), button:has-text('Ocultar')", timeout=5000)
+                except PlaywrightTimeoutError:
+                    pass
+
+                # Extraer datos adicionales de la tarjeta expandida
+                extra = page.evaluate("""
+                    () => {
+                        const ocultarBtns = Array.from(document.querySelectorAll('a, button'))
+                            .filter(el => el.innerText && el.innerText.trim().toLowerCase().includes('ocultar'));
+                        if (ocultarBtns.length === 0) return null;
+
+                        const btn = ocultarBtns[0];
+                        let card = btn;
+                        for (let j = 0; j < 12; j++) {
+                            if (!card.parentElement) break;
+                            card = card.parentElement;
+                            if (card.querySelectorAll('a, button').length >= 2) break;
+                        }
+
+                        const lines = (card.innerText || '').split('\n')
+                            .map(l => l.trim()).filter(Boolean);
+
+                        function after(label) {
+                            for (let i = 0; i < lines.length; i++) {
+                                if (lines[i].toLowerCase().startsWith(label.toLowerCase())) {
+                                    const inline = lines[i].substring(label.length).replace(/^\\s*:\\s*/, '').trim();
+                                    if (inline) return inline;
+                                    if (i + 1 < lines.length) return lines[i + 1];
+                                }
+                            }
+                            return 'N/A';
+                        }
+
+                        return {
+                            Establecimiento: after('Establecimiento educativo') !== 'N/A'
+                                ? after('Establecimiento educativo') : after('Establecimiento'),
+                            Sede: after('Sede'),
+                            Direccion: after('Dirección') !== 'N/A' ? after('Dirección') : after('Direccion'),
+                        };
+                    }
+                """)
+
+                if extra and i < len(basic_data):
+                    basic_data[i].update(extra)
+
+                # Colapsar: clic en "Ocultar detalle"
+                ocultar = page.locator("a, button").filter(has_text="Ocultar").first
+                if ocultar.count() > 0:
+                    ocultar.click()
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=5000)
+                    except Exception:
+                        pass
+                    time.sleep(0.5)
+
+            except Exception as err:
+                print(f"    Error expandiendo tarjeta {i}: {err}")
+                continue
+
+        return [d for d in basic_data if d]
+
     except Exception as e:
-        print(f"  Error en extract_card_data: {e}")
-        return None
+        print(f"  Error en extract_all_cards_js: {e}")
+        return []
