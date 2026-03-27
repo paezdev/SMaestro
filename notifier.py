@@ -20,11 +20,17 @@ def send_telegram_message(new_plazas):
     limit = 10
     for idx, plaza in enumerate(new_plazas[:limit]):
         message += f"🔹 *Cargo:* {plaza.get('Cargo', 'N/A')}\n"
-        message += f"📍 *Municipio:* {plaza.get('Municipio', 'N/A')}\n"
-        message += f"🏫 *Sede/Estabil:* {plaza.get('Establecimiento', 'N/A')}\n"
+        message += f"📊 *Postulados:* {plaza.get('Postulados', 'N/A')}\n"
+        message += f"⭐ *Priorización:* {plaza.get('Tipo Priorización', 'N/A')}\n"
         message += f"📅 *Cierre:* {plaza.get('Cierre Vacante', 'N/A')}\n"
-        if 'Postulados' in plaza and plaza['Postulados']:
-             message += f"👥 *Postulados:* {plaza['Postulados']}\n"
+        message += f"📚 *Área:* {plaza.get('Area', 'N/A')}\n"
+        message += f"🏢 *Secretaría:* {plaza.get('Secretaria', 'N/A')}\n"
+        message += f"📍 *Municipio:* {plaza.get('Municipio', 'N/A')} ({plaza.get('Departamento', 'N/A')})\n"
+        message += f"🏫 *Establecimiento:* {plaza.get('Establecimiento', 'N/A')}\n"
+        message += f"🚪 *Sede:* {plaza.get('Sede', 'N/A')}\n"
+        message += f"🗺️ *Zona:* {plaza.get('Zona', 'N/A')} (Detalle: {plaza.get('Zona Detalle', 'N/A')})\n"
+        message += f"🏘️ *Barrio:* {plaza.get('Barrio', 'N/A')} | *Dir:* {plaza.get('Direccion', 'N/A')}\n"
+        message += f"🗓️ *Calendario:* {plaza.get('Calendario Educativo', 'N/A')}\n"
         message += "------\n"
         
     if count > limit:

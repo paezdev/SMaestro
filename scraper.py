@@ -205,16 +205,16 @@ def get_visible_card_data(page):
                 }
                 return 'N/A';
             }
-
             return {
-                Cargo: after('Cargo'),
-                Area: after('Area') !== 'N/A' ? after('Area') : after('rea'),
-                Municipio: after('Municipio'),
-                'Cierre Vacante': after('Cierre vacante') !== 'N/A' ? after('Cierre vacante') : after('Cierre'),
-                Postulados: after('Postulados'),
-                Zona: after('Zona'),
-                Departamento: after('Departamento'),
-                Secretaria: after('Secretar')
+                Cargo: lines.length > 0 ? lines[0] : after('Cargo'),
+                'Tipo Priorización': after('tipo priorizaci') !== 'N/A' ? after('tipo priorizaci') : 'N/A',
+                Area: after('área') !== 'N/A' ? after('área') : (after('area') !== 'N/A' ? after('area') : 'N/A'),
+                Municipio: after('municipio'),
+                'Cierre Vacante': after('cierre vacante') !== 'N/A' ? after('cierre vacante') : after('cierre'),
+                Postulados: after('postulados'),
+                Zona: after('zona'),
+                Departamento: after('departamento'),
+                Secretaria: after('secretar')
             };
         }
 
@@ -261,9 +261,12 @@ def get_expanded_card_details(page):
         }
 
         return {
-            Establecimiento: after('Establecimiento educativo') !== 'N/A' ? after('Establecimiento educativo') : after('Establecimiento'),
-            Sede: after('Sede'),
-            Direccion: after('Direcci') !== 'N/A' ? after('Direcci') : 'N/A'
+            Establecimiento: after('establecimiento educativo') !== 'N/A' ? after('establecimiento educativo') : after('establecimiento'),
+            Sede: after('sede'),
+            'Zona Detalle': after('zona'),
+            Barrio: after('barrio'),
+            Direccion: after('direcci') !== 'N/A' ? after('direcci') : 'N/A',
+            'Calendario Educativo': after('calendario educativo')
         };
     })()
     """
