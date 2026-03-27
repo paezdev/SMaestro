@@ -40,38 +40,50 @@ def run_scraper():
             page.wait_for_selector("#form-busqueda\\:idInputDepartamento", timeout=15000)
             print("Página cargada. Abriendo dropdown Departamento/Municipio...")
 
-            # 1) Clic en el trigger (flecha) del dropdown Departamento/Municipio por ID exacto
-            page.locator("#form-busqueda\\:idInputDepartamento .ui-selectonemenu-trigger").click()
+            # 1) Clic en el label del dropdown Departamento/Municipio para abrirlo
+            page.locator("#form-busqueda\\:idInputDepartamento_label").click()
 
-            # 2) Esperar que el panel del Departamento sea visible (por ID exacto)
+            # 2) Esperar que el panel sea visible (por ID exacto del panel)
             page.wait_for_selector("#form-busqueda\\:idInputDepartamento_panel", timeout=10000)
             time.sleep(0.5)
             save_debug_screenshot(page, "02_dropdown_abierto")
 
-            # 3) Clic en el input filtro para enfocarlo
+            # 3) Clic en el input filtro para enfocarlo y escribir
             filter_input = page.locator("#form-busqueda\\:idInputDepartamento_filter")
             filter_input.click()
             time.sleep(0.3)
 
-            # 4) Escribir "Antioquia" (el panel filtra la lista en tiempo real)
-            filter_input.type("Antioquia", delay=50)
-            time.sleep(1)
+            # 4) Escribir "Antioquia" carácter a carácter — PrimeFaces filtra en tiempo real
+            filter_input.type("Antioquia", delay=80)
+            time.sleep(1.5)
             save_debug_screenshot(page, "03_antioquia_escrito")
 
-            # 5) Presionar Enter → selecciona la opción y cierra el panel
-            filter_input.press("Enter")
-            print("Enter presionado. Esperando recarga AJAX...")
+            # 5) Clic DIRECTO en la primera fila visible del panel (exactamente "Antioquia")
+            #    Usamos JS para hacer clic en la primera <td> o <li> cuyo texto sea EXACTAMENTE "Antioquia"
+            clicked = page.evaluate("""
+                (function() {
+                    var panel = document.getElementById('form-busqueda:idInputDepartamento_panel');
+                    if (!panel) return 'ERROR: panel not found';
+                    var rows = Array.from(panel.querySelectorAll('tr td, li'));
+                    var visible = rows.filter(function(r) { return r.offsetParent !== null; });
+                    for (var i = 0; i < visible.length; i++) {
+                        var txt = visible[i].innerText ? visible[i].innerText.trim() : '';
+                        if (txt === 'Antioquia') {
+                            visible[i].click();
+                            return 'clicked: ' + txt;
+                        }
+                    }
+                    var avail = visible.slice(0,5).map(function(r){ return r.innerText ? r.innerText.trim() : ''; }).join(' | ');
+                    return 'not_found. Visible rows: ' + avail;
+                })()
+            """)
+            print(f"  Selección Antioquia: {clicked}")
 
-            # 6) Esperar que el panel se cierre y el AJAX complete
-            page.wait_for_function(
-                "() => !document.querySelector('#form-busqueda\\\\:idInputDepartamento_panel') || "
-                "document.querySelector('#form-busqueda\\\\:idInputDepartamento_panel').style.display === 'none' || "
-                "document.querySelector('#form-busqueda\\\\:idInputDepartamento_panel').classList.contains('ui-helper-hidden')",
-                timeout=15000
-            )
+            # 6) Esperar que el panel se cierre y el AJAX de resultados complete
             page.wait_for_load_state("networkidle", timeout=30000)
             time.sleep(2)
             save_debug_screenshot(page, "04_antioquia_seleccionada")
+
 
             # Verificar que el label del dropdown ya muestre "Antioquia"
             label_text = page.locator("#form-busqueda\\:idInputDepartamento_label").inner_text()
