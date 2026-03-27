@@ -114,8 +114,16 @@ def run_scraper():
                 # Expandir cada tarjeta para obtener Establecimiento/Sede
                 for i, card_data in enumerate(basic_cards):
                     try:
-                        # Tomar siempre el primer "Ver detalle" disponible
-                        ver_btn = page.locator("a, button").filter(has_text="Ver detalle").first
+                        # Tomar el botón "Ver detalle" correspondiente a la iteración actua
+                        ver_btns = page.locator("a, button").filter(has_text="Ver detalle")
+                        
+                        # Precaución: si por alguna razón no hay suficientes botones, salir
+                        if ver_btns.count() <= i:
+                            print(f"    Advertencia: No se encontró botón 'Ver detalle' para tarjeta {i}")
+                            plazas.append(card_data)
+                            continue
+                            
+                        ver_btn = ver_btns.nth(i)
                         ver_btn.scroll_into_view_if_needed()
                         ver_btn.click()
 
@@ -134,7 +142,7 @@ def run_scraper():
                         print(f"    + {card_data.get('Cargo','?')} | {card_data.get('Municipio','?')} | {card_data.get('Establecimiento','?')}")
                         plazas.append(card_data)
 
-                        # Contraer
+                        # Contraer asegurándonos de hacer clic en el botón Ocultar correcto
                         ocultar = page.locator("a, button").filter(has_text="Ocultar").first
                         if ocultar.is_visible():
                             ocultar.click()
