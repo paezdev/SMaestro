@@ -41,17 +41,20 @@ def run_scraper():
             page.wait_for_selector(".ui-selectonemenu", timeout=15000)
             print("Página cargada. Seleccionando Departamento/Municipio = ANTIOQUIA...")
 
-            # El segundo dropdown es "Departamento/Municipio" (índice 1)
-            page.locator(".ui-selectonemenu").nth(1).click()
-            time.sleep(1.5)
+            # En PrimeFaces, el panel de opciones se agrega al <body> aparte.
+            # Hay que: 1) clic en el trigger arrow, 2) esperar que el panel sea visible, 3) clic en la opción.
+            
+            # Clic en el botón trigger (flecha) del segundo dropdown (Departamento/Municipio)
+            page.locator(".ui-selectonemenu").nth(1).locator(".ui-selectonemenu-trigger").click()
+            
+            # Esperar que el panel con las opciones sea visible en el DOM
+            page.wait_for_selector(".ui-selectonemenu-panel:visible", timeout=10000)
+            time.sleep(0.5)
             save_debug_screenshot(page, "02_dropdown_abierto")
 
-            # Seleccionar "Antioquia" del dropdown Departamento/Municipio
-            try:
-                page.locator("tr.ui-selectonemenu-item, li.ui-selectonemenu-item").filter(has_text="Antioquia").first.click(timeout=8000)
-            except PlaywrightTimeoutError:
-                # Fallback: cualquier elemento que contenga el texto
-                page.locator("[class*='selectonemenu-item']").filter(has_text="Antioquia").first.click(timeout=5000)
+            # Clic en "Antioquia" DENTRO del panel visible
+            page.locator(".ui-selectonemenu-panel:visible").locator("tr, li").filter(has_text="Antioquia").first.click(timeout=8000)
+
 
             print("ANTIOQUIA seleccionado en Departamento/Municipio. Esperando recarga AJAX...")
 
