@@ -2,16 +2,13 @@ name: "Sistema Maestro Scraper"
 
 on:
   schedule:
-    # Corre cada 30 minutos (UTC)
     - cron: '*/30 * * * *'
-  # Permite ejecutar el workflow manualmente desde la interfaz de Github Actions
   workflow_dispatch:
 
 jobs:
   scrape-and-notify:
     runs-on: ubuntu-latest
-    
-    # Otorgar permisos al GITHUB_TOKEN para hacer commit de vuelta al repo
+
     permissions:
       contents: write
 
@@ -30,20 +27,27 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           playwright install chromium
+          playwright install-deps chromium
 
       - name: Run Scraper
         env:
-          # Estas variables vendrán de GitHub Settings > Secrets and variables > Actions
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
-      - name: Commit Action State (Excel and JSON)
+      - name: Upload Debug Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: debug_screenshots/
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: Commit State (Excel y JSON)
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          # Intentar agregar archivos si cambiaron o fueron creados
-          git add vacantes_vistas.json nuevas_plazas.xlsx || true
-          # Hacer commit solo si hay cambios. Si no, salir silenciosamente (exit 0)
-          git commit -m "auto: actualizando historial de vacantes y excel" || exit 0
-          git push
+          git add vacantes_vistas.json nuevas_plazas.xlsx 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "auto: actualizando historial de vacantes"
+          git push || true
