@@ -2,123 +2,162 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 from tenacity import retry, stop_after_attempt, wait_fixed
 import time
 
-URL = "https://sistemamaestro.mineducacion.gov.co/SistemaMaestro/busquedaVacantes.xhtml" # URL base aproximada, asumiendo la ruta correcta
+URL = "https://sistemamaestro.mineducacion.gov.co/SistemaMaestro/busquedaVacantes.xhtml"
 
 @retry(stop=stop_after_attempt(2), wait=wait_fixed(3))
 def run_scraper():
     plazas = []
-    
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         page = context.new_page()
-        
+
         try:
             print("Accediendo al Sistema Maestro...")
             page.goto(URL, timeout=60000)
-            
-            # Localizar el dropdown de departamento. Usamos selectores resilientes que capturan etiquetas
-            print("Seleccionando Departamento ANTIOQUIA...")
-            
-            # Una estrategia común en Primefaces es hacer clic en la etiqueta o el trigger asociado
-            try:
-                # Buscamos el contenedor del menú que esté cerca del texto 'Departamento'
-                page.locator("label:has-text('Departamento')").locator("..").locator(".ui-selectonemenu-trigger").first.click(timeout=10000)
-            except PlaywrightTimeoutError:
-                # Fallback: intentar solo con selectores de primefaces crudos si la estructura varía
-                page.locator(".ui-selectonemenu-trigger").first.click()
-                 
-            time.sleep(1) # Esperar animación de Primefaces
-            page.locator("li.ui-selectonemenu-item:has-text('ANTIOQUIA')").click()
-            
-            print("Haciendo clic en Buscar...")
-            page.locator("button:has-text('Buscar')").click()
-            
-            # Esperas de 3 segundos para el AJAX de PrimeFaces
-            print("Esperando 3 segundos a que cargue el data table...")
-            time.sleep(3)
-            page.wait_for_selector(".ui-datatable", timeout=15000)
-            
-            # Loop de Paginación (11 páginas o las que existan)
-            current_page = 1
-            max_pages = 11
-            
-            while True:
-                print(f"Procesando página {current_page}...")
-                
-                # Esperar a que las filas existan
-                try:
-                    page.wait_for_selector(".ui-datatable-data tr.ui-widget-content", timeout=10000)
-                except PlaywrightTimeoutError:
-                    print("No se encontró la tabla de datos en esta página. Puede que esté vacía.")
-                    break
-                    
-                count_rows = page.locator(".ui-datatable-data tr.ui-widget-content").count()
-                
-                for i in range(count_rows):
-                    row = page.locator(".ui-datatable-data tr.ui-widget-content").nth(i)
-                    
-                    # Clic en "Ver detalle"
-                    detail_btn = row.locator("button:has-text('Ver detalle'), button[title='Ver detalle'], a:has-text('Ver detalle'), button span.ui-icon-search, button:has(span:text-matches('(?i)detalle'))")
-                    
-                    if detail_btn.count() > 0:
-                        detail_btn.first.click()
-                        time.sleep(2) # Primefaces AJAX dialog loading
-                        
-                        try:
-                            dialog = page.locator(".ui-dialog:visible")
-                            dialog.wait_for(timeout=5000)
-                            
-                            def get_field(label_val):
-                                try:
-                                    # Intentar encontrar un strong, b o label que contenga el texto y buscar su valor hermano
-                                    field = dialog.locator(f"*:has-text('{label_val}')").last
-                                    text = field.locator("xpath=parent::*").inner_text()
-                                    # Limpiar la etiqueta del texto original
-                                    return text.replace(label_val, "").replace(":", "").strip()
-                                except Exception:
-                                    return "N/A"
 
-                            plaza = {
-                                "Cargo": get_field("Cargo"),
-                                "Area": get_field("Área") or get_field("Area"),
-                                "Municipio": get_field("Municipio"),
-                                "Establecimiento": get_field("Establecimiento") or get_field("Sede"),
-                                "Cierre Vacante": get_field("Cierre"),
-                                "Postulados": get_field("Postulados")
-                            }
-                            
-                            plazas.append(plaza)
-                            
-                            # Cerrar el diálogo modal
-                            close_btn = dialog.locator(".ui-dialog-titlebar-close")
-                            if close_btn.count() > 0:
-                                close_btn.click()
-                            else:
-                                page.keyboard.press("Escape")
-                                
-                            time.sleep(1) # animacion de cerrado
-                        except Exception as inner_e:
-                            print(f"Error procesando fila {i}: {inner_e}")
-                            page.keyboard.press("Escape") # Intentar asegurar el cierre
-                
-                # Validar paginación
-                next_btn = page.locator(".ui-paginator-next")
-                if next_btn.count() == 0 or "ui-state-disabled" in next_btn.first.get_attribute("class") or current_page >= max_pages:
-                    print("Se alcanzó el límite de páginas o no hay botón 'Siguiente'. Fin de la paginación.")
+            # Esperar a que el dropdown de Secretaria sea visible
+            page.wait_for_selector(".ui-selectonemenu", timeout=15000)
+            print("Página cargada. Seleccionando Secretaría = Antioquia...")
+
+            # Hacer clic en el trigger del primer dropdown (Secretaria)
+            page.locator(".ui-selectonemenu").first.click()
+            time.sleep(1)
+
+            # Seleccionar "Antioquia" — el sitio usa <tr> en PrimeFaces para las opciones
+            page.locator("tr.ui-selectonemenu-item, li.ui-selectonemenu-item").filter(has_text="Antioquia").first.click()
+
+            # Esperar a que la tabla se recargue (AJAX reactivo — no hay botón Buscar)
+            print("Esperando recarga AJAX tras seleccionar Antioquia...")
+            time.sleep(3)
+
+            # Verificar que los resultados cargaron correctamente
+            page.wait_for_selector(".vacantes-disponibles, #form-busqueda\\:tabla-vacantes, .ui-g.vacante, a:has-text('Ver detalle')", timeout=15000)
+            print("Resultados de Antioquia cargados.")
+
+            # --- Loop de paginación ---
+            current_page = 1
+            max_pages = 15  # límite seguro de seguridad
+
+            while True:
+                print(f"Extrayendo datos de la página {current_page}...")
+
+                # Esperar que haya al menos un botón "Ver detalle"
+                try:
+                    page.wait_for_selector("a:has-text('Ver detalle'), button:has-text('Ver detalle')", timeout=10000)
+                except PlaywrightTimeoutError:
+                    print("No hay botones 'Ver detalle' en esta página. Fin.")
                     break
-                    
-                print("Avanzando a la siguiente página...")
+
+                # Obtener todos los botones/links "Ver detalle" visibles
+                detail_links = page.locator("a:has-text('Ver detalle'), button:has-text('Ver detalle')")
+                count = detail_links.count()
+                print(f"  → {count} vacantes en esta página")
+
+                for i in range(count):
+                    try:
+                        # Re-localizar para evitar referencias obsoletas del DOM
+                        current_links = page.locator("a:has-text('Ver detalle'), button:has-text('Ver detalle')")
+                        btn = current_links.nth(i)
+
+                        # Desplazarse hasta el botón y hacer clic
+                        btn.scroll_into_view_if_needed()
+                        btn.click()
+                        time.sleep(1.5)  # esperar expansión AJAX
+
+                        # El detalle se expande inline. Buscamos el contenedor padre de este botón
+                        # que ahora dice "Ocultar detalle". Extraemos desde las tarjetas visibles por índice.
+                        plaza = extract_current_card_data(page, i)
+                        if plaza:
+                            plazas.append(plaza)
+
+                        # Cerrar (contraer) la expansión haciendo clic en "Ocultar detalle"
+                        hide_links = page.locator("a:has-text('Ocultar detalle'), button:has-text('Ocultar detalle')")
+                        if hide_links.count() > 0:
+                            hide_links.first.click()
+                            time.sleep(0.8)
+
+                    except Exception as err:
+                        print(f"  Error en vacante {i}: {err}")
+                        continue
+
+                # --- Paginación ---
+                next_btn = page.locator(".ui-paginator-next")
+                if next_btn.count() == 0:
+                    print("No se encontró botón de siguiente página. Fin.")
+                    break
+
+                next_class = next_btn.first.get_attribute("class") or ""
+                if "ui-state-disabled" in next_class or current_page >= max_pages:
+                    print(f"Fin de paginación en la página {current_page}.")
+                    break
+
+                print(f"Avanzando a la página {current_page + 1}...")
                 next_btn.first.click()
-                time.sleep(3) # Esperar a AJAX
+                time.sleep(3)
                 current_page += 1
-                
+
         except Exception as e:
             print(f"Error durante el scraping: {e}")
-            raise # Lanzar la excepción para activar el reintento de tenacity
+            raise  # Activar reintento de tenacity
         finally:
             browser.close()
-            
+
+    print(f"Scraping finalizado. Total vacantes recolectadas: {len(plazas)}")
     return plazas
+
+
+def extract_current_card_data(page, card_index):
+    """
+    Extrae los datos de la tarjeta que fue expandida (el 'Ver detalle' fue clickeado).
+    Los datos visibles y los datos del detalle expandido se leen del DOM.
+    """
+    try:
+        # Usar JavaScript para extraer texto de la tarjeta expandida (la que tiene "Ocultar detalle")
+        plaza_js = page.evaluate("""
+            () => {
+                // Encontrar la tarjeta que está actualmente expandida (tiene "Ocultar detalle")
+                const allLinks = Array.from(document.querySelectorAll('a, button'));
+                const ocultarLink = allLinks.find(el => el.innerText && el.innerText.trim() === 'Ocultar detalle');
+                if (!ocultarLink) return null;
+
+                // Subir al contenedor padre de la tarjeta
+                const card = ocultarLink.closest('.p-grid, .ui-g, div[id*="tabla-vacantes"]');
+                if (!card) return null;
+
+                // Función auxiliar para extraer texto siguiente al label
+                function getField(parentEl, labelText) {
+                    const allText = parentEl.innerText || '';
+                    const lines = allText.split('\\n').map(l => l.trim()).filter(Boolean);
+                    for (let i = 0; i < lines.length; i++) {
+                        if (lines[i].includes(labelText) && i + 1 < lines.length) {
+                            // Si la línea contiene el label seguido de un valor en la misma línea
+                            const same = lines[i].replace(labelText + ':', '').replace(labelText, '').trim();
+                            if (same) return same;
+                            return lines[i+1];
+                        }
+                    }
+                    return 'N/A';
+                }
+
+                return {
+                    'Cargo': getField(card, 'Cargo'),
+                    'Area': getField(card, 'Área') || getField(card, 'Area'),
+                    'Municipio': getField(card, 'Municipio'),
+                    'Establecimiento': getField(card, 'Establecimiento educativo') || getField(card, 'Establecimiento'),
+                    'Sede': getField(card, 'Sede'),
+                    'Cierre Vacante': getField(card, 'Cierre vacante') || getField(card, 'Cierre'),
+                    'Postulados': getField(card, 'Postulados'),
+                    'Zona': getField(card, 'Zona'),
+                    'Direccion': getField(card, 'Dirección') || getField(card, 'Direccion'),
+                    'Secretaria': getField(card, 'Secretaría de Educación') || getField(card, 'Secretaria'),
+                };
+            }
+        """)
+        return plaza_js
+    except Exception as e:
+        print(f"  Error extracting JS card data: {e}")
+        return None
