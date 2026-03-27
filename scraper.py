@@ -58,30 +58,29 @@ def run_scraper():
             time.sleep(1.5)
             save_debug_screenshot(page, "03_antioquia_escrito")
 
-            # 5) Clic DIRECTO en la primera fila visible del panel (exactamente "Antioquia")
-            #    Usamos JS para hacer clic en la primera <td> o <li> cuyo texto sea EXACTAMENTE "Antioquia"
-            clicked = page.evaluate("""
-                (function() {
-                    var panel = document.getElementById('form-busqueda:idInputDepartamento_panel');
-                    if (!panel) return 'ERROR: panel not found';
-                    var rows = Array.from(panel.querySelectorAll('tr td, li'));
-                    var visible = rows.filter(function(r) { return r.offsetParent !== null; });
-                    for (var i = 0; i < visible.length; i++) {
-                        var txt = visible[i].innerText ? visible[i].innerText.trim() : '';
-                        if (txt === 'Antioquia') {
-                            visible[i].click();
-                            return 'clicked: ' + txt;
-                        }
-                    }
-                    var avail = visible.slice(0,5).map(function(r){ return r.innerText ? r.innerText.trim() : ''; }).join(' | ');
-                    return 'not_found. Visible rows: ' + avail;
-                })()
-            """)
-            print(f"  Selección Antioquia: {clicked}")
-
-            # 6) Esperar que el panel se cierre y el AJAX de resultados complete
-            page.wait_for_load_state("networkidle", timeout=30000)
-            time.sleep(2)
+            import re
+            # 5) Clic DIRECTO en la fila usando Playwright (dispara eventos reales del mouse que PrimeFaces requiere para AJAX)
+            # Usamos regex ^Antioquia$ para evitar clics en "Antioquia/Abejorral"
+            item_locator = page.locator("#form-busqueda\\:idInputDepartamento_panel tr, #form-busqueda\\:idInputDepartamento_panel li").filter(has_text=re.compile(r"^Antioquia$")).first
+            
+            # Esperar a que la petición AJAX de PrimeFaces termine tras hacer clic
+            try:
+                with page.expect_response(lambda response: "busquedaVacantes" in response.url, timeout=15000):
+                    item_locator.click(force=True)
+                    print("  Clic en opción Antioquia realizado. Procesando AJAX del filtro...")
+            except PlaywrightTimeoutError:
+                # Si por alguna razón no intercepta el ajax de busquedaVacantes, intentar un click simple y sleep
+                item_locator.click(force=True)
+                page.wait_for_load_state("networkidle", timeout=30000)
+            
+            # 6) Esperar que el panel se cierre
+            page.wait_for_function(
+                "() => !document.querySelector('#form-busqueda\\\\:idInputDepartamento_panel') || "
+                "document.querySelector('#form-busqueda\\\\:idInputDepartamento_panel').style.display === 'none' || "
+                "document.querySelector('#form-busqueda\\\\:idInputDepartamento_panel').classList.contains('ui-helper-hidden')",
+                timeout=15000
+            )
+            time.sleep(2.5)  # Margen adicional para el refresco del DOM de la tabla
             save_debug_screenshot(page, "04_antioquia_seleccionada")
 
 
