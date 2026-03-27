@@ -176,11 +176,15 @@ def get_fully_expanded_cards_data(page):
             var rawText = (card.innerText || '');
             var lines = rawText.split(/\\r?\\n/).map(function(l) { return l.trim(); }).filter(Boolean);
 
-            function after(label) {
+            function after(label, skipFirst) {
                 var lLabel = label.toLowerCase();
+                var count = 0;
                 for (var i = 0; i < lines.length; i++) {
                     var lLine = lines[i].toLowerCase();
                     if (lLine.indexOf(lLabel) === 0) {
+                        count++;
+                        if (skipFirst && count === 1) continue; // Saltar la primera vez que se encuentra
+                        
                         var inline = lines[i].substring(label.length).replace(/^\\s*:\\s*/, '').trim();
                         if (inline) return inline;
                         if (i + 1 < lines.length) return lines[i + 1];
@@ -196,12 +200,12 @@ def get_fully_expanded_cards_data(page):
                 Municipio: after('municipio'),
                 'Cierre Vacante': after('cierre vacante') !== 'N/A' ? after('cierre vacante') : after('cierre'),
                 Postulados: after('postulados'),
-                Zona: after('zona'),
+                Zona: after('zona'), // Toma la primera Zona (Ej: Itaguí)
                 Departamento: after('departamento'),
                 Secretaria: after('secretar'),
                 Establecimiento: after('establecimiento educativo') !== 'N/A' ? after('establecimiento educativo') : after('establecimiento'),
                 Sede: after('sede'),
-                'Zona Detalle': after('zona'),
+                'Zona Detalle': after('zona', true), // Toma la SEGUNDA Zona (Ej: Urbana)
                 Barrio: after('barrio'),
                 Direccion: after('direcci') !== 'N/A' ? after('direcci') : 'N/A',
                 'Calendario Educativo': after('calendario educativo')
